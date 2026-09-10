@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-const MAX_BYTES = 5 * 1024 * 1024;
+// Below Vercel's 4.5 MB request body limit — this upload passes through the
+// function, unlike guest photos which go straight to Supabase Storage.
+const MAX_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
   const form = await request.formData();
@@ -21,7 +23,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "ไฟล์ต้องเป็นรูปภาพ" }, { status: 400 });
   }
   if (file.size > MAX_BYTES) {
-    return NextResponse.json({ error: "รูปต้องมีขนาดไม่เกิน 5 MB" }, { status: 400 });
+    return NextResponse.json({ error: "รูปต้องมีขนาดไม่เกิน 4 MB" }, { status: 400 });
   }
 
   const db = supabaseAdmin();

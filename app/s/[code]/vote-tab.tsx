@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useVoterId } from "@/lib/hooks";
 import { publicUrl } from "@/lib/storage";
+import { Spinner } from "@/components/spinner";
 import type { Candidate, Session } from "@/lib/types";
 
 export default function VoteTab({ session }: { session: Session }) {
@@ -126,7 +127,11 @@ export default function VoteTab({ session }: { session: Session }) {
                 />
                 <span className="flex items-center justify-between gap-1 px-3 py-2.5 text-sm font-medium">
                   <span className="truncate">{c.name}</span>
-                  {selected && <span aria-hidden>✓</span>}
+                  {saving === c.id ? (
+                    <Spinner className="size-3.5 shrink-0" />
+                  ) : (
+                    selected && <span aria-hidden>✓</span>
+                  )}
                 </span>
               </button>
             </li>

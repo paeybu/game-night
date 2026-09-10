@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Warm neutrals pulled from the photo so the scrim never looks grey-on-amber. */
+  --background: #fdf8f3;
+  --foreground: #1d1512;
 }
 
 @theme inline {
@@ -13,13 +14,55 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #130f0d;
+    --foreground: #f2e9e1;
   }
 }
 
+html {
+  /* Fallback while the photo loads, and the colour behind the fixed layer. */
+  background-color: var(--background);
+}
+
 body {
-  background: var(--background);
+  background: transparent;
   color: var(--foreground);
   font-family: var(--font-thai), system-ui, sans-serif;
+  /* Thai has no inter-word spaces; without this a long run refuses to break
+     and pushes the layout wider than a phone viewport. */
+  overflow-wrap: anywhere;
+}
+
+/*
+ * A fixed layer rather than `background-attachment: fixed`, which stutters or
+ * silently falls back to `scroll` on iOS Safari. `50% 32%` keeps the horizon
+ * and hills in frame on wide desktop crops (where cover trims top and bottom)
+ * while leaving the sand art centred on tall phone crops (where it trims the
+ * sides instead).
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(
+      to bottom,
+      rgb(253 248 243 / 0.82),
+      rgb(253 248 243 / 0.9)
+    ),
+    url("/bg.webp");
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-position: 50% 32%;
+}
+
+@media (prefers-color-scheme: dark) {
+  body::before {
+    background-image: linear-gradient(
+        to bottom,
+        rgb(12 8 6 / 0.72),
+        rgb(12 8 6 / 0.86)
+      ),
+      url("/bg.webp");
+  }
 }

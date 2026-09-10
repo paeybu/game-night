@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { compressImage } from "@/lib/compress";
+import { GUEST_PHOTO } from "@/lib/limits";
+import { Spinner } from "@/components/spinner";
 import type { Session, Submission } from "@/lib/types";
 
 const MAX_TEXT = 240;
@@ -11,12 +14,13 @@ export default function ShareTab({ session }: { session: Session }) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [stage, setStage] = useState<"idle" | "compressing" | "uploading">("idle");
   const [error, setError] = useState<string | null>(null);
   const [mine, setMine] = useState<Submission | null>(null);
   const [position, setPosition] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const busy = stage !== "idle";
   const storageKey = `submission:${session.id}`;
 
   const refreshMine = useCallback(
@@ -90,21 +94,17 @@ export default function ShareTab({ session }: { session: Session }) {
       return;
     }
 
-    setBusy(true);
     setError(null);
+    setStage(file ? "compressing" : "uploading");
 
     try {
       let photoPath: string | null = null;
 
       if (file) {
-        const { default: imageCompression } = await import("browser-image-compression");
-        const compressed = await imageCompression(file, {
-          maxSizeMB: 1,
-          maxWidthOrHeight: 1600,
-          useWebWorker: true,
-          fileType: "image/jpeg",
-        });
+        setStage("compressing");
+        const compressed = await compressImage(file, GUEST_PHOTO);
 
+        setStage("uploading");
         photoPath = `${session.id}/${crypto.randomUUID()}.jpg`;
         const { error: uploadError } = await supabase.storage
           .from("photos")
@@ -133,7 +133,7 @@ export default function ShareTab({ session }: { session: Session }) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง");
     } finally {
-      setBusy(false);
+      setStage("idle");
     }
   }
 
@@ -145,6 +145,7 @@ export default function ShareTab({ session }: { session: Session }) {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX_TEXT))}
+          disabled={busy}
           rows={3}
           placeholder="พิมพ์อะไรสักอย่าง…"
           className="w-full resize-none rounded-2xl border border-black/10 bg-transparent px-4 py-3 text-base outline-none focus:border-foreground dark:border-white/20"
@@ -163,6 +164,7 @@ export default function ShareTab({ session }: { session: Session }) {
         ref={fileRef}
         type="file"
         accept="image/*"
+        disabled={busy}
         onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
         className="w-full text-sm text-zinc-500 file:mr-3 file:rounded-full file:border-0 file:bg-black/5 file:px-4 file:py-2.5 file:text-sm dark:file:bg-white/10"
       />
@@ -172,9 +174,10 @@ export default function ShareTab({ session }: { session: Session }) {
       <button
         onClick={() => void submit()}
         disabled={busy}
-        className="w-full rounded-2xl bg-foreground px-4 py-4 text-base font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-foreground px-4 py-4 text-base font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
       >
-        {busy ? "กำลังส่ง…" : "ส่งขึ้นจอ"}
+        {busy && <Spinner className="size-5" />}
+        {stage === "compressing" ? "กำลังย่อรูป…" : stage === "uploading" ? "กำลังส่ง…" : "ส่งขึ้นจอ"}
       </button>
     </div>
   );

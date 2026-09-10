@@ -1,4 +1,5 @@
 import { createSession } from "./actions";
+import SubmitButton from "./submit-button";
 
 export default function Home() {
   return (
@@ -11,12 +12,7 @@ export default function Home() {
       </div>
 
       <form action={createSession}>
-        <button
-          type="submit"
-          className="rounded-full bg-foreground px-8 py-4 text-lg font-medium text-background transition-opacity hover:opacity-85"
-        >
-          สร้างห้องใหม่
-        </button>
+        <SubmitButton>สร้างห้องใหม่</SubmitButton>
       </form>
 
       <p className="text-sm text-zinc-500">คุณจะได้หน้าจอสำหรับฉายพร้อม QR และหน้าแอดมิน</p>

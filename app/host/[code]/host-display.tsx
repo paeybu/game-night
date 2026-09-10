@@ -28,7 +28,9 @@ export default function HostDisplay({
   );
 
   return (
-    <main className="relative flex min-h-dvh flex-1 flex-col bg-zinc-950 text-zinc-50">
+    // Heavier scrim than the rest of the site: guest photos and the tally need
+    // a near-neutral backing, but the beach still reads through at the edges.
+    <main className="relative flex min-h-dvh flex-1 flex-col bg-zinc-950/88 text-zinc-50">
       {feedActive ? (
         current ? (
           <>

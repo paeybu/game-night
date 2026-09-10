@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 import { publicUrl } from "@/lib/storage";
+import { compressImage } from "@/lib/compress";
+import { CANDIDATE_PHOTO } from "@/lib/limits";
+import { Spinner } from "@/components/spinner";
 import type { Candidate, DisplayMode, Session } from "@/lib/types";
 
 const MODES: { mode: DisplayMode; label: string; hint: string }[] = [
@@ -28,56 +31,102 @@ export default function AdminPanel({
   const [session, setSession] = useState(initialSession);
   const [candidates, setCandidates] = useState(initialCandidates);
   const [error, setError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [pending, startTransition] = useTransition();
+  // Which action is in flight, e.g. "mode:vote" or "del:<id>". One at a time,
+  // so a double tap can't race two writes against the same session row.
+  const [pending, setPending] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
-  async function patch(update: Partial<Pick<Session, "display_mode" | "voting_open" | "display_ms">>) {
+  const busy = pending !== null;
+
+  async function patch(
+    key: string,
+    update: Partial<Pick<Session, "display_mode" | "voting_open" | "display_ms">>,
+  ) {
+    if (busy) return;
     setError(null);
+    setPending(key);
+
     const previous = session;
     setSession({ ...session, ...update }); // optimistic — the host screen follows via realtime
 
-    const res = await fetch("/api/admin/session", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code: session.code, ...update }),
-    });
+    try {
+      const res = await fetch("/api/admin/session", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: session.code, ...update }),
+      });
 
-    if (!res.ok) {
+      if (!res.ok) {
+        setSession(previous);
+        setError(((await res.json()) as { error?: string }).error ?? "อัปเดตไม่สำเร็จ");
+      }
+    } catch {
       setSession(previous);
-      setError(((await res.json()) as { error?: string }).error ?? "อัปเดตไม่สำเร็จ");
+      setError("เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง");
+    } finally {
+      setPending(null);
     }
   }
 
   async function addCandidate(formData: FormData) {
+    if (busy) return;
     setError(null);
-    setUploading(true);
     formData.set("code", session.code);
 
-    const res = await fetch("/api/admin/candidates", { method: "POST", body: formData });
-    const body = (await res.json()) as { candidate?: Candidate; error?: string };
-    setUploading(false);
+    try {
+      // Shrink before it leaves the phone: a raw camera photo would otherwise
+      // be rejected by the 5 MB cap on the candidates bucket.
+      const picked = formData.get("photo");
+      if (picked instanceof File && picked.size > 0) {
+        setPending("compress");
+        formData.set("photo", await compressImage(picked, CANDIDATE_PHOTO));
+      }
 
-    if (!res.ok || !body.candidate) {
-      setError(body.error ?? "อัปโหลดไม่สำเร็จ");
-      return;
+      setPending("add");
+      const res = await fetch("/api/admin/candidates", { method: "POST", body: formData });
+      const body = (await res.json()) as { candidate?: Candidate; error?: string };
+
+      if (!res.ok || !body.candidate) {
+        setError(body.error ?? "อัปโหลดไม่สำเร็จ");
+        return;
+      }
+      const added = body.candidate;
+      setCandidates((list) => [...list, added]);
+      formRef.current?.reset();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ ลองใหม่อีกครั้ง");
+    } finally {
+      setPending(null);
     }
-    setCandidates((list) => [...list, body.candidate!]);
-    formRef.current?.reset();
   }
 
   async function removeCandidate(id: string) {
+    if (busy) return;
     setError(null);
-    const res = await fetch(
-      `/api/admin/candidates?code=${session.code}&id=${id}`,
-      { method: "DELETE" },
-    );
-    if (!res.ok) {
-      setError(((await res.json()) as { error?: string }).error ?? "ลบไม่สำเร็จ");
-      return;
+    setPending(`del:${id}`);
+
+    try {
+      const res = await fetch(`/api/admin/candidates?code=${session.code}&id=${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        setError(((await res.json()) as { error?: string }).error ?? "ลบไม่สำเร็จ");
+        return;
+      }
+      setCandidates((list) => list.filter((c) => c.id !== id));
+    } catch {
+      setError("ลบไม่สำเร็จ ลองใหม่อีกครั้ง");
+    } finally {
+      setPending(null);
     }
-    setCandidates((list) => list.filter((c) => c.id !== id));
   }
+
+  const optionClass = (selected: boolean) =>
+    `relative rounded-xl border transition-colors disabled:opacity-50 ${
+      selected
+        ? "border-transparent bg-foreground text-background"
+        : "border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+    }`;
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-5 py-8">
@@ -107,14 +156,14 @@ export default function AdminPanel({
           {MODES.map(({ mode, label, hint }) => (
             <button
               key={mode}
-              onClick={() => startTransition(() => void patch({ display_mode: mode }))}
-              className={`rounded-xl border px-3 py-3 text-sm font-medium transition-colors ${
-                session.display_mode === mode
-                  ? "border-transparent bg-foreground text-background"
-                  : "border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
-              }`}
+              onClick={() => void patch(`mode:${mode}`, { display_mode: mode })}
+              disabled={busy}
+              className={`${optionClass(session.display_mode === mode)} px-3 py-3 text-sm font-medium`}
             >
-              <span className="block">{label}</span>
+              <span className="flex items-center justify-center gap-1.5">
+                {pending === `mode:${mode}` && <Spinner className="size-3.5" />}
+                {label}
+              </span>
               <span className="block text-[11px] font-normal opacity-60">{hint}</span>
             </button>
           ))}
@@ -132,14 +181,14 @@ export default function AdminPanel({
             {DURATIONS.map((d) => (
               <button
                 key={d.ms}
-                onClick={() => startTransition(() => void patch({ display_ms: d.ms }))}
-                className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
-                  session.display_ms === d.ms
-                    ? "border-transparent bg-foreground text-background"
-                    : "border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
-                }`}
+                onClick={() => void patch(`ms:${d.ms}`, { display_ms: d.ms })}
+                disabled={busy}
+                className={`${optionClass(session.display_ms === d.ms)} px-3 py-2 text-sm`}
               >
-                {d.label}
+                <span className="flex items-center justify-center gap-1.5">
+                  {pending === `ms:${d.ms}` && <Spinner className="size-3.5" />}
+                  {d.label}
+                </span>
               </button>
             ))}
           </div>
@@ -150,13 +199,15 @@ export default function AdminPanel({
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-sm font-medium tracking-wider text-zinc-500 uppercase">การโหวต</h2>
           <button
-            onClick={() => startTransition(() => void patch({ voting_open: !session.voting_open }))}
-            className={`rounded-full px-5 py-2 text-sm font-medium transition-colors ${
+            onClick={() => void patch("voting", { voting_open: !session.voting_open })}
+            disabled={busy}
+            className={`flex items-center gap-2 rounded-full px-5 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
               session.voting_open
                 ? "bg-emerald-600 text-white hover:bg-emerald-700"
                 : "border border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
             }`}
           >
+            {pending === "voting" && <Spinner className="size-3.5" />}
             {session.voting_open ? "เปิดโหวตอยู่ — กดเพื่อปิด" : "ปิดโหวตอยู่ — กดเพื่อเปิด"}
           </button>
         </div>
@@ -170,21 +221,28 @@ export default function AdminPanel({
             name="name"
             placeholder="ชื่อตัวเลือก"
             required
-            className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3 outline-none focus:border-foreground dark:border-white/20"
+            disabled={busy}
+            className="w-full rounded-xl border border-black/10 bg-transparent px-4 py-3 outline-none focus:border-foreground disabled:opacity-50 dark:border-white/20"
           />
           <input
             name="photo"
             type="file"
             accept="image/*"
             required
-            className="w-full text-sm text-zinc-500 file:mr-3 file:rounded-full file:border-0 file:bg-black/5 file:px-4 file:py-2 file:text-sm dark:file:bg-white/10"
+            disabled={busy}
+            className="w-full text-sm text-zinc-500 file:mr-3 file:rounded-full file:border-0 file:bg-black/5 file:px-4 file:py-2 file:text-sm disabled:opacity-50 dark:file:bg-white/10"
           />
           <button
             type="submit"
-            disabled={uploading}
-            className="w-full rounded-xl bg-foreground px-4 py-3 font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-foreground px-4 py-3 font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
           >
-            {uploading ? "กำลังเพิ่ม…" : "เพิ่มตัวเลือก"}
+            {(pending === "add" || pending === "compress") && <Spinner />}
+            {pending === "compress"
+              ? "กำลังย่อรูป…"
+              : pending === "add"
+                ? "กำลังเพิ่ม…"
+                : "เพิ่มตัวเลือก"}
           </button>
         </form>
 
@@ -204,9 +262,11 @@ export default function AdminPanel({
                 <span className="flex-1 truncate font-medium">{c.name}</span>
                 <button
                   onClick={() => void removeCandidate(c.id)}
-                  className="rounded-full px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/40"
+                  disabled={busy}
+                  className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 dark:hover:bg-red-950/40"
                 >
-                  ลบ
+                  {pending === `del:${c.id}` && <Spinner className="size-3.5" />}
+                  {pending === `del:${c.id}` ? "กำลังลบ…" : "ลบ"}
                 </button>
               </li>
             ))}
@@ -215,7 +275,7 @@ export default function AdminPanel({
       </section>
 
       <p className="text-xs text-zinc-500">
-        {pending ? "กำลังบันทึก…" : "การเปลี่ยนแปลงมีผลกับจอทันที"}
+        {busy ? "กำลังบันทึก…" : "การเปลี่ยนแปลงมีผลกับจอทันที"}
       </p>
     </main>
   );
