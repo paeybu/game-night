@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useLiveSession } from "@/lib/hooks";
+import { usePolledSession } from "@/lib/hooks";
 import type { Session } from "@/lib/types";
 import ShareTab from "./share-tab";
 import VoteTab from "./vote-tab";
@@ -9,7 +9,7 @@ import VoteTab from "./vote-tab";
 type Tab = "share" | "vote";
 
 export default function GuestApp({ session: initialSession }: { session: Session }) {
-  const session = useLiveSession(initialSession);
+  const session = usePolledSession(initialSession);
   const [tab, setTab] = useState<Tab>("share");
 
   return (

@@ -22,6 +22,7 @@ export default function HostDisplay({
 
   const feedActive = session.display_mode === "feed";
   const { current, queuedCount, progress } = useQueue(
+    session.code,
     session.id,
     session.display_ms,
     feedActive,

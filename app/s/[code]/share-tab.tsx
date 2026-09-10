@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { usePoll } from "@/lib/hooks";
 import { compressImage } from "@/lib/compress";
 import { GUEST_PHOTO } from "@/lib/limits";
 import { Spinner } from "@/components/spinner";
 import type { Session, Submission } from "@/lib/types";
 
 const MAX_TEXT = 240;
+// Only matters while this guest has something queued.
+const MINE_POLL_MS = 12000;
 
 export default function ShareTab({ session }: { session: Session }) {
   const supabase = supabaseBrowser();
@@ -22,6 +25,8 @@ export default function ShareTab({ session }: { session: Session }) {
 
   const busy = stage !== "idle";
   const storageKey = `submission:${session.id}`;
+  // Once it has been shown there is nothing left to track, so stop polling.
+  const done = mine?.status === "done";
 
   const refreshMine = useCallback(
     async (id: string) => {
@@ -51,33 +56,13 @@ export default function ShareTab({ session }: { session: Session }) {
     [supabase, session.id],
   );
 
-  // Restore the last submission from this device, then follow it live.
-  useEffect(() => {
-    const followMine = () => {
-      const id = localStorage.getItem(storageKey);
-      if (id) void refreshMine(id);
-    };
-
-    const channel = supabase
-      .channel(`mine:${session.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "submissions",
-          filter: `session_id=eq.${session.id}`,
-        },
-        followMine,
-      )
-      .subscribe((status: string) => {
-        if (status === "SUBSCRIBED") followMine();
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase, session.id, storageKey, refreshMine]);
+  // Restore the last submission from this device and track its position.
+  // Polling rather than subscribing: a session-wide submissions channel would
+  // fan every insert out to all 200 guests at once.
+  usePoll(() => {
+    const id = localStorage.getItem(storageKey);
+    if (id) void refreshMine(id);
+  }, done ? null : MINE_POLL_MS);
 
   function pickFile(next: File | null) {
     setFile(next);

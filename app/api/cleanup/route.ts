@@ -1,7 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
-/** Daily Vercel Cron: drop shown submissions and their photos after 24h. */
+/**
+ * Daily Vercel Cron backstop. Photos are normally deleted the moment they
+ * leave the screen (see /api/host/advance); this catches the stragglers —
+ * submissions from a session that was abandoned before they were shown.
+ */
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
   if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -14,7 +18,6 @@ export async function GET(request: NextRequest) {
   const { data, error } = await db
     .from("submissions")
     .delete()
-    .eq("status", "done")
     .lt("created_at", cutoff)
     .select("photo_path");
 

@@ -2,10 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
-import { useVoterId } from "@/lib/hooks";
+import { usePoll, useVoterId } from "@/lib/hooks";
 import { publicUrl } from "@/lib/storage";
 import { Spinner } from "@/components/spinner";
 import type { Candidate, Session } from "@/lib/types";
+
+const CANDIDATE_POLL_MS = 20000;
 
 export default function VoteTab({ session }: { session: Session }) {
   const supabase = supabaseBrowser();
@@ -24,22 +26,8 @@ export default function VoteTab({ session }: { session: Session }) {
     setCandidates((data as Candidate[] | null) ?? []);
   }, [supabase, session.id]);
 
-  useEffect(() => {
-    const channel = supabase
-      .channel(`candidates:${session.id}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "candidates", filter: `session_id=eq.${session.id}` },
-        () => void loadCandidates(),
-      )
-      .subscribe((status: string) => {
-        if (status === "SUBSCRIBED") void loadCandidates();
-      });
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [supabase, session.id, loadCandidates]);
+  // Candidates change a handful of times per night, so a slow poll is plenty.
+  usePoll(() => void loadCandidates(), CANDIDATE_POLL_MS);
 
   useEffect(() => {
     if (!voterId) return;

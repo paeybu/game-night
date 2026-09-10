@@ -112,7 +112,8 @@ create policy "insert votes"       on votes       for insert to anon with check 
 create policy "update votes"       on votes       for update to anon using (true) with check (true);
 
 grant select on vote_counts to anon;
-grant execute on function advance_queue(uuid) to anon;
+-- advance_queue is called from /api/host/advance with the service role.
+revoke execute on function advance_queue(uuid) from anon;
 
 -- -------------------------------------------------------------- realtime
 

@@ -5,11 +5,20 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { useInterval } from "@/lib/hooks";
 import type { Submission } from "@/lib/types";
 
+/** Coalesce a burst of inserts into one read. */
+const SYNC_DEBOUNCE_MS = 400;
+
 /**
- * Drives the host feed. The timer is derived from the row's `started_at` rather
- * than a local timeout, so a throttled or reloaded tab lands on the same item.
+ * Drives the host feed. The timer is derived from the row's `started_at`
+ * rather than a local timeout, so a throttled or reloaded tab lands on the
+ * same item.
  */
-export function useQueue(sessionId: string, displayMs: number, active: boolean) {
+export function useQueue(
+  code: string,
+  sessionId: string,
+  displayMs: number,
+  active: boolean,
+) {
   const [current, setCurrent] = useState<Submission | null>(null);
   const [queuedCount, setQueuedCount] = useState(0);
   const [now, setNow] = useState(() => Date.now());
@@ -26,17 +35,30 @@ export function useQueue(sessionId: string, displayMs: number, active: boolean) 
     setQueuedCount(count ?? 0);
   }, [supabase, sessionId]);
 
+  /**
+   * Advancing goes through the server: it holds the service role, and it
+   * deletes the photo that just finished showing.
+   */
   const advance = useCallback(async () => {
     if (advancing.current) return;
     advancing.current = true;
     try {
-      const { data } = await supabase.rpc("advance_queue", { sid: sessionId });
-      setCurrent((data as Submission | null) ?? null);
+      const res = await fetch("/api/host/advance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (res.ok) {
+        const { submission } = (await res.json()) as { submission: Submission | null };
+        setCurrent(submission);
+      }
       await refreshCount();
+    } catch {
+      // Offline or a hiccup — the next tick tries again.
     } finally {
       advancing.current = false;
     }
-  }, [supabase, sessionId, refreshCount]);
+  }, [code, refreshCount]);
 
   /**
    * Adopts whatever is already on screen (another host tab, or a reload) and
@@ -63,6 +85,14 @@ export function useQueue(sessionId: string, displayMs: number, active: boolean) 
   useEffect(() => {
     if (!active) return;
 
+    // 200 guests submitting at once would otherwise fire 200 reads at the
+    // display; collapse them into one.
+    let debounce: ReturnType<typeof setTimeout> | null = null;
+    const queueSync = () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(() => void sync(), SYNC_DEBOUNCE_MS);
+    };
+
     const channel = supabase
       .channel(`queue:${sessionId}`)
       .on(
@@ -73,15 +103,16 @@ export function useQueue(sessionId: string, displayMs: number, active: boolean) 
           table: "submissions",
           filter: `session_id=eq.${sessionId}`,
         },
-        () => void sync(),
+        queueSync,
       )
       // The first sync runs once the socket is live, so nothing slips through
       // between the initial read and the subscription.
       .subscribe((status: string) => {
-        if (status === "SUBSCRIBED") void sync();
+        if (status === "SUBSCRIBED") queueSync();
       });
 
     return () => {
+      if (debounce) clearTimeout(debounce);
       void supabase.removeChannel(channel);
     };
   }, [active, sessionId, supabase, sync]);
