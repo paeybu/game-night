@@ -29,44 +29,61 @@ export default function HostDisplay({
   );
 
   return (
-    // Heavier scrim than the rest of the site: guest photos and the tally need
-    // a near-neutral backing, but the beach still reads through at the edges.
-    <main className="relative flex min-h-dvh flex-1 flex-col bg-zinc-950/88 text-zinc-50">
-      {feedActive ? (
-        current ? (
-          <>
-            <div className="flex flex-1 flex-col items-center justify-center gap-8 p-10">
-              {current.photo_path && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={publicUrl("photos", current.photo_path)}
-                  alt=""
-                  className="max-h-[70vh] max-w-full rounded-3xl object-contain shadow-2xl"
+    <main className="relative flex min-h-dvh flex-1 flex-col text-zinc-50">
+      {/*
+       * The display carries its own copy of the beach rather than leaning on
+       * the global `body::before` layer: that one is tinted by the OS colour
+       * scheme, and the machine driving a projector is not ours to predict.
+       * The scrim matches the dark-mode veil the rest of the site uses, so the
+       * display reads as the same beach as the home and guest pages.
+       */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[url('/bg.webp')] bg-cover bg-[position:50%_32%] bg-no-repeat"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[rgb(12_8_6/0.72)] to-[rgb(12_8_6/0.86)]"
+      />
+
+      {/* `relative` so the content stacks above the two background layers. */}
+      <div className="relative flex flex-1 flex-col">
+        {feedActive ? (
+          current ? (
+            <>
+              <div className="flex flex-1 flex-col items-center justify-center gap-8 p-10">
+                {current.photo_path && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={publicUrl("photos", current.photo_path)}
+                    alt=""
+                    className="max-h-[70vh] max-w-full rounded-3xl object-contain shadow-2xl"
+                  />
+                )}
+                {current.text && (
+                  <p className="max-w-4xl text-center text-4xl leading-tight font-medium text-balance drop-shadow-[0_2px_12px_rgb(0_0_0/0.7)]">
+                    {current.text}
+                  </p>
+                )}
+              </div>
+              <div className="h-2 w-full bg-white/10">
+                <div
+                  className="h-full bg-white transition-[width] duration-500 ease-linear"
+                  style={{ width: `${Math.round(progress * 100)}%` }}
                 />
-              )}
-              {current.text && (
-                <p className="max-w-4xl text-center text-4xl leading-tight font-medium text-balance">
-                  {current.text}
-                </p>
-              )}
-            </div>
-            <div className="h-2 w-full bg-white/10">
-              <div
-                className="h-full bg-white transition-[width] duration-500 ease-linear"
-                style={{ width: `${Math.round(progress * 100)}%` }}
-              />
-            </div>
-          </>
+              </div>
+            </>
+          ) : (
+            <IdleScreen code={session.code} guestUrl={guestUrl} />
+          )
         ) : (
-          <IdleScreen code={session.code} guestUrl={guestUrl} />
-        )
-      ) : (
-        <VoteBoard
-          sessionId={session.id}
-          votingOpen={session.voting_open}
-          reveal={session.display_mode === "results"}
-        />
-      )}
+          <VoteBoard
+            sessionId={session.id}
+            votingOpen={session.voting_open}
+            reveal={session.display_mode === "results"}
+          />
+        )}
+      </div>
 
       {feedActive && current && guestUrl && (
         <div className="absolute right-6 bottom-8 flex items-center gap-3 rounded-2xl bg-white p-3 text-zinc-900">
@@ -99,7 +116,9 @@ export default function HostDisplay({
 
 function IdleScreen({ code, guestUrl }: { code: string; guestUrl: string }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-10 p-10 text-center">
+    // The sand still shows through the scrim, so the type carries its own
+    // shadow rather than relying on the backing for contrast.
+    <div className="flex flex-1 flex-col items-center justify-center gap-10 p-10 text-center drop-shadow-[0_2px_12px_rgb(0_0_0/0.7)]">
       <h1 className="text-5xl font-semibold tracking-tight">สแกนเพื่อเข้าร่วม</h1>
       {guestUrl && (
         <div className="rounded-3xl bg-white p-6">
@@ -108,7 +127,7 @@ function IdleScreen({ code, guestUrl }: { code: string; guestUrl: string }) {
       )}
       <div className="space-y-2">
         <p className="font-mono text-6xl font-semibold tracking-[0.2em]">{code}</p>
-        <p className="text-xl text-zinc-400">ส่งรูปหรือข้อความ แล้วจะขึ้นบนจอนี้เลย</p>
+        <p className="text-xl text-zinc-200">ส่งรูปหรือข้อความ แล้วจะขึ้นบนจอนี้เลย</p>
       </div>
     </div>
   );
