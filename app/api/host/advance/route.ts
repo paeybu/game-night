@@ -30,13 +30,24 @@ export async function POST(request: NextRequest) {
     .select("id, photo_path")
     .eq("session_id", session.id)
     .eq("status", "showing")
+    .order("started_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   const { data, error } = await db.rpc("advance_queue", { sid: session.id });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
+  // An empty queue makes the function return a NULL composite, which arrives
+  // as an all-null object rather than JSON null. Left as-is the display would
+  // treat it as a real item and stall on a blank screen instead of the QR.
+  const next = data as Submission | null;
+  const advanced = next?.id !== finishing?.id;
+
   const previous = finishing as { id: string; photo_path: string | null } | null;
-  if (previous?.photo_path) {
+  // `advance_queue` hands back the same item when it still has time on screen
+  // (a second display, a retry). Deleting its photo then would blank a photo
+  // mid-show.
+  if (advanced && previous?.photo_path) {
     // Best effort: a failed delete costs storage, a thrown error costs the
     // display its next item.
     const { error: removeError } = await db.storage
@@ -49,9 +60,5 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // An empty queue makes the function return a NULL composite, which arrives
-  // as an all-null object rather than JSON null. Left as-is the display would
-  // treat it as a real item and stall on a blank screen instead of the QR.
-  const next = data as Submission | null;
   return NextResponse.json({ submission: next?.id ? next : null });
 }

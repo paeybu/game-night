@@ -55,13 +55,43 @@ create index if not exists votes_candidate_idx on votes (candidate_id);
 
 -- Atomic "advance queue": finish the current item, claim the next one.
 -- SECURITY DEFINER because anon has no update policy on submissions.
+--
+-- The clock lives here, not on the display. Every display runs its own timer,
+-- and there is no rule that says only one is open — a laptop, the TV and a
+-- forgotten tab all point at the same room. If this just advanced on demand,
+-- their expiries would stack: the first call claims the next item and the
+-- second one, arriving a moment later, throws it away unseen. So the item on
+-- screen is only finished once it has actually had its `display_ms`; until
+-- then every caller is handed back the same item.
 create or replace function advance_queue(sid uuid) returns submissions
 language plpgsql
 security definer
 set search_path = public
 as $$
-declare nxt submissions;
+declare
+  cur submissions;
+  nxt submissions;
+  dur int;
 begin
+  select coalesce(display_ms, 0) into dur from sessions where id = sid;
+
+  -- `for update` so two simultaneous callers queue up here rather than both
+  -- reading the same item and both deciding to advance past it.
+  select * into cur from submissions
+   where session_id = sid and status = 'showing'
+   order by started_at desc
+   limit 1
+   for update;
+
+  -- A 250 ms grace: a display's timer and the database clock never agree to
+  -- the millisecond, and a caller that is a hair early should advance rather
+  -- than stall for a whole tick.
+  if cur.id is not null
+     and cur.started_at > now() - make_interval(secs => greatest(dur - 250, 0) / 1000.0)
+  then
+    return cur;
+  end if;
+
   update submissions set status = 'done'
    where session_id = sid and status = 'showing';
 
